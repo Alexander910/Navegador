@@ -1,0 +1,20 @@
+# Entorno virtual de Python
+ng/
+
+# Caché de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Archivos de entorno
+.env
+
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# Archivos temporales
+*.log

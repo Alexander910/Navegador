@@ -1,62 +1,46 @@
-import re
-
-class NodoDOM:
-    def __init__(self, nombre, texto=None):
-        self.nombre = nombre
-        self.texto = texto
-        self.hijos = []
-
-    def agregar_hijo(self, hijo):
-        self.hijos.append(hijo)
+from dom import Document, Element, TextNode
 
 
 class TreeBuilder:
+    """Construye un DOM jerárquico a partir de tokens analizados."""
+
     def __init__(self, lexer_tokens):
         self.lexer_tokens = lexer_tokens
 
     def construir(self):
-
-        documento = NodoDOM("Document")
+        documento = Document()
         pila = [documento]
 
         for token in self.lexer_tokens:
-
-            # OPEN_TAG(nombre, atributos)
-            if token.startswith("OPEN_TAG("):
-
-                contenido = token[len("OPEN_TAG("):-1]
-
-                nombre = contenido.split(",", 1)[0].strip()
-
-                nodo = NodoDOM(nombre)
-
-                pila[-1].agregar_hijo(nodo)
-
+            if token["type"] == "OPEN_TAG":
+                nodo = Element(token["tag"], token["attributes"])
+                pila[-1].add_child(nodo)
                 pila.append(nodo)
 
-            # TEXT(...)
-            elif token.startswith("TEXT("):
+            elif token["type"] == "TEXT":
+                pila[-1].add_child(TextNode(token["text"]))
 
-                texto = token[len("TEXT("):-1].strip('"')
-
-                nodo_texto = NodoDOM("#text", texto)
-
-                pila[-1].agregar_hijo(nodo_texto)
-
-            # CLOSE_TAG(...)
-            elif token.startswith("CLOSE_TAG("):
-
+            elif token["type"] == "CLOSE_TAG":
+                if len(pila) == 1 or pila[-1].tag != token["tag"]:
+                    raise ValueError(f"Etiqueta de cierre inesperada: </{token['tag']}>")
                 pila.pop()
+
+        if len(pila) != 1:
+            raise ValueError(f"Etiqueta sin cerrar: <{pila[-1].tag}>")
 
         return documento
 
     def imprimir(self, nodo, nivel=0):
+        sangria = "    " * nivel
+        if isinstance(nodo, Document):
+            print(f"{sangria}Document")
+        elif isinstance(nodo, TextNode):
+            print(f'{sangria}TEXT("{nodo.text}")')
+        else:
+            print(
+                f"{sangria}Element tag={nodo.tag} "
+                f"attributes={nodo.attributes}"
+            )
 
-        print("    " * nivel + nodo.nombre)
-
-        for hijo in nodo.hijos:
-
-            if hijo.nombre == "#text":
-                print("    " * (nivel + 1) + hijo.texto)
-            else:
-                self.imprimir(hijo, nivel + 1)
+        for hijo in nodo.children:
+            self.imprimir(hijo, nivel + 1)
