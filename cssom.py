@@ -42,7 +42,7 @@ class Selector:
 @dataclass(frozen=True)
 class CSSRule:
     selector: Selector
-    declarations: dict
+    declarations: tuple[Declaration, ...]
     order: int
 
 
@@ -84,7 +84,8 @@ class CSSParser:
 
     @staticmethod
     def parse_declarations(text):
-        declarations = {}
+        """Conserva el orden y las repeticiones de las declaraciones CSS."""
+        declarations = []
         for fragment in text.split(";"):
             if ":" not in fragment:
                 continue
@@ -92,8 +93,8 @@ class CSSParser:
             property_name = property_name.strip().lower()
             value = value.strip()
             if property_name and value:
-                declarations[property_name] = value
-        return declarations
+                declarations.append(Declaration(property_name, value))
+        return tuple(declarations)
 
 
 def parse_css(sources):

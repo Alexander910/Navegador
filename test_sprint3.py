@@ -1,28 +1,20 @@
-"""Pruebas sin Tkinter de las siete fases de la Practica No. 3."""
+"""Pruebas del caso integral y de las siete fases sin abrir Tkinter."""
 
 from pathlib import Path
 import tempfile
 import unittest
 
-from css_loader import CSSLoader, CSSSource
+from css_loader import CSSLoadError, CSSLoader
 from cssom import CLASS_SPECIFICITY, ID_SPECIFICITY, TAG_SPECIFICITY, CSSParser
-from cssom_inspector import CSSOMInspector
 from dom import Document, Element, TextNode
-from dom_bridge import DOMBridge
-from layout import LayoutEngine
+from dom_bridge import DOMBridge, QuickJSAdapter, quickjs_available
+from javascript_loader import JavaScriptLoadError, JavaScriptLoader
+from lector_html import LectorHTML
+from main import RESOURCES, load_document
 from painter import Painter
+from pipeline import RenderPipeline
 from render_tree import RenderTreeBuilder
-from style_discovery import StyleDiscovery
 from style_resolver import StyleResolver
-
-
-CASE_CSS = """body { background-color: white; }
-h1 { color: red; font-size: 32px; }
-.principal { color: green; }
-#titulo { color: blue; }
-.descripcion { color: gray; font-size: 18px; }
-#oculto { display: none; }
-button { color: white; background-color: blue; font-size: 16px; }"""
 
 
 def add(parent, tag, attributes=None, text=None):
@@ -32,127 +24,234 @@ def add(parent, tag, attributes=None, text=None):
     return element
 
 
-def case_document():
-    document = Document()
-    html = add(document, "html")
-    head = add(html, "head")
-    add(head, "link", {"rel": "stylesheet", "href": "style.css"})
-    body = add(html, "body")
-    title = add(body, "h1", {"id": "titulo", "class": "principal"}, "MiniBrowser EDU")
-    message = add(body, "p", {"id": "mensaje", "class": "descripcion"}, "Render Pipeline funcionando")
-    hidden = add(body, "p", {"id": "oculto"}, "No deberías verme")
-    button = add(body, "button", {"id": "boton"}, "Ejecutar")
-    return document, title, message, hidden, button
+def find_by_id(node, identifier):
+    if isinstance(node, Element) and node.get_attribute("id") == identifier:
+        return node
+    for child in node.children:
+        found = find_by_id(child, identifier)
+        if found:
+            return found
+    return None
 
 
-class DiscoveryAndCSSOMTests(unittest.TestCase):
-    def test_style_discovery_finds_link_stylesheet(self):
-        document, *_ = case_document()
-        self.assertEqual(StyleDiscovery().discover(document), ["style.css"])
+def render_contains(node, dom_node):
+    if node.dom_node is dom_node:
+        return True
+    return any(render_contains(child, dom_node) for child in node.children)
 
-    def test_loader_reads_css_source_and_missing_file_is_safe(self):
+
+def render_node_for(node, dom_node):
+    if node.dom_node is dom_node:
+        return node
+    for child in node.children:
+        found = render_node_for(child, dom_node)
+        if found:
+            return found
+    return None
+
+
+class FakeCanvas:
+    def __init__(self):
+        self.operations = []
+
+    def delete(self, *args):
+        self.operations.append(("delete", args))
+
+    def create_text(self, *args, **kwargs):
+        self.operations.append(("text", args, kwargs))
+
+    def create_rectangle(self, *args, **kwargs):
+        self.operations.append(("rectangle", args, kwargs))
+
+
+class ResourceAndPipelineTests(unittest.TestCase):
+    def setUp(self):
+        self.html_path = RESOURCES / "index.html"
+        self.document = load_document(self.html_path)
+
+    def test_real_html_builds_dom_and_discovers_css_and_javascript(self):
+        title = find_by_id(self.document, "titulo")
+        self.assertIsNotNone(title)
+        self.assertEqual(title.tag, "h1")
+        pipeline = RenderPipeline(self.document, FakeCanvas(), self.html_path)
+        pipeline.render()
+        self.assertEqual(pipeline.css_paths, ["style.css"])
+        self.assertIn("#titulo", pipeline.css_sources[0].source)
+        self.assertEqual(len(pipeline.cssom.rules), 7)
+        self.assertEqual(pipeline.script_discovery.discover(self.document), ["app.js"])
+        scripts = pipeline.javascript_loader.load_all(["app.js"])
+        self.assertIn("mensaje.innerHTML", scripts[0].source)
+
+    def test_official_computed_styles_and_hidden_render_exclusion(self):
+        pipeline = RenderPipeline(self.document, FakeCanvas(), self.html_path)
+        tree = pipeline.render()
+        title = find_by_id(self.document, "titulo")
+        description = find_by_id(self.document, "mensaje")
+        hidden = find_by_id(self.document, "oculto")
+        button = find_by_id(self.document, "boton")
+        self.assertEqual(pipeline.computed_styles[title]["color"], "blue")
+        self.assertEqual(pipeline.computed_styles[title]["font-size"], "32px")
+        self.assertEqual(pipeline.computed_styles[description]["color"], "gray")
+        self.assertEqual(pipeline.computed_styles[description]["font-size"], "18px")
+        self.assertEqual(pipeline.computed_styles[button]["color"], "white")
+        self.assertEqual(pipeline.computed_styles[button]["background-color"], "blue")
+        self.assertEqual((pipeline.computed_styles[button]["width"], pipeline.computed_styles[button]["height"]),
+                         ("120px", "40px"))
+        self.assertIsNotNone(hidden.parent)
+        self.assertFalse(render_contains(tree, hidden))
+
+    def test_pipeline_has_seven_explicit_phases_without_tkinter(self):
+        canvas = FakeCanvas()
+        pipeline = RenderPipeline(self.document, canvas, self.html_path)
+        pipeline.render()
+        self.assertEqual(pipeline.phase_log, ["style-discovery", "css-loader", "css-parser",
+                                              "style-resolver", "render-tree", "layout", "paint"])
+        self.assertEqual(pipeline.events, ["render"])
+        self.assertTrue(canvas.operations)
+
+    def test_painter_uses_computed_styles_for_official_visuals(self):
+        canvas = FakeCanvas()
+        RenderPipeline(self.document, canvas, self.html_path).render()
+        texts = [operation[2] for operation in canvas.operations if operation[0] == "text"]
+        title = next(item for item in texts if item["text"] == "Quickjs Funionando")
+        description = next(item for item in texts if item["text"] == "estilos cambiados")
+        self.assertEqual((title["fill"], title["font"][1]), ("blue", 32))
+        self.assertEqual((description["fill"], description["font"][1]), ("gray", 18))
+        self.assertNotIn("No deberías verme", [item["text"] for item in texts])
+        self.assertTrue(any(op[0] == "rectangle" and op[2]["fill"] == "blue"
+                            for op in canvas.operations))
+
+    def test_display_block_none_block_rebuilds_render_tree(self):
+        pipeline = RenderPipeline(self.document, FakeCanvas(), self.html_path)
+        pipeline.render()
+        hidden = find_by_id(self.document, "oculto")
+        bridge = pipeline.dom_bridge
+        bridge.set_inline_style(hidden, "display", "block")
+        self.assertTrue(render_contains(pipeline.render_tree, hidden))
+        bridge.set_inline_style(hidden, "display", "none")
+        self.assertFalse(render_contains(pipeline.render_tree, hidden))
+        bridge.set_inline_style(hidden, "display", "block")
+        self.assertTrue(render_contains(pipeline.render_tree, hidden))
+        self.assertEqual(pipeline.events, ["render", "render", "render", "render"])
+
+    def test_content_visual_and_geometry_invalidation_are_minimal(self):
+        pipeline = RenderPipeline(self.document, FakeCanvas(), self.html_path)
+        pipeline.render()
+        pipeline.events.clear()
+        pipeline.phase_log.clear()
+        message = find_by_id(self.document, "mensaje")
+        bridge = pipeline.dom_bridge
+        bridge.set_text(message.children[0], "Contenido actualizado")
+        bridge.set_inline_style(message, "color", "gray")
+        bridge.set_inline_style(message, "fontSize", "18px")
+        self.assertEqual(pipeline.events, ["render", "repaint", "reflow"])
+        self.assertEqual(pipeline.phase_log.count("layout"), 2)  # contenido + geometria
+        self.assertEqual(pipeline.phase_log.count("render-tree"), 1)
+
+
+class CSSCascadeTests(unittest.TestCase):
+    def _paragraph_style(self, css):
+        document = Document()
+        paragraph = add(document, "p", {"id": "item", "class": "notice"})
+        return StyleResolver().resolve(document, CSSParser().parse(css))[paragraph]
+
+    def test_specificity_values_and_last_equal_rule(self):
+        parser = CSSParser()
+        self.assertEqual(parser.parse_selector("p").specificity(), TAG_SPECIFICITY)
+        self.assertEqual(parser.parse_selector(".notice").specificity(), CLASS_SPECIFICITY)
+        self.assertEqual(parser.parse_selector("#item").specificity(), ID_SPECIFICITY)
+        style = self._paragraph_style("p { color: red; } .notice { color: green; } #item { color: blue; }")
+        self.assertEqual(style["color"], "blue")
+        self.assertEqual(self._paragraph_style("p { color: red; } p { color: blue; }")["color"], "blue")
+
+    def test_shorthand_longhand_order_is_preserved(self):
+        first = self._paragraph_style("p { margin: 10px; margin-left: 20px; }")
+        second = self._paragraph_style("p { margin-left: 20px; margin: 10px; }")
+        self.assertEqual((first["margin-top"], first["margin-left"]), ("10px", "20px"))
+        self.assertEqual((second["margin-top"], second["margin-left"]), ("10px", "10px"))
+
+    def test_inheritance_and_inline_priority(self):
+        document = Document()
+        parent = add(document, "div", {"style": "color: purple; font-size: 21px"})
+        text = parent.append_child(TextNode("Heredado"))
+        style = StyleResolver().resolve(document, CSSParser().parse("div { color: red; font-size: 10px; }"))
+        self.assertEqual(style[text]["color"], "purple")
+        self.assertEqual(style[text]["font-size"], "21px")
+        element = add(document, "p", {"id": "prioridad", "style": "color: orange"})
+        style = StyleResolver().resolve(document, CSSParser().parse("#prioridad { color: blue; }"))
+        self.assertEqual(style[element]["color"], "orange")
+
+
+class DOMAndErrorTests(unittest.TestCase):
+    def test_append_child_reparents_without_duplicates_and_preserves_parent(self):
+        first, second, child = Element("div"), Element("section"), Element("p")
+        first.append_child(child)
+        first.append_child(child)
+        self.assertEqual(first.children, [child])
+        second.append_child(child)
+        self.assertEqual(first.children, [])
+        self.assertEqual(second.children, [child])
+        self.assertIs(child.parent, second)
+        with self.assertRaises(ValueError):
+            child.append_child(second)
+
+    def test_resource_load_errors_name_the_missing_resource(self):
         with tempfile.TemporaryDirectory() as folder:
             html = Path(folder) / "index.html"
             html.write_text("<html></html>", encoding="utf-8")
-            (Path(folder) / "style.css").write_text("h1 { color: red; }", encoding="utf-8")
-            source = CSSLoader(document_path=html).load("style.css")
-            self.assertEqual(source.filename, "style.css")
-            self.assertIn("color: red", source.source)
-            self.assertEqual(CSSLoader(document_path=html).load("missing.css").source, "")
+            with self.assertRaisesRegex(FileNotFoundError, "archivo HTML"):
+                LectorHTML(Path(folder) / "missing.html").leer()
+            with self.assertRaisesRegex(CSSLoadError, "missing.css"):
+                CSSLoader(document_path=html).load("missing.css")
+            with self.assertRaisesRegex(JavaScriptLoadError, "missing.js"):
+                JavaScriptLoader(document_path=html).load("missing.js")
 
-    def test_parser_builds_the_seven_official_rules(self):
-        sheet = CSSParser().parse([CSSSource("style.css", CASE_CSS)])
-        self.assertEqual(len(sheet.rules), 7)
-        self.assertEqual(CSSOMInspector().inspect(sheet)[0]["selector"], "body")
-
-    def test_selector_matching_and_official_specificities(self):
-        document, title, *_ = case_document()
-        parser = CSSParser()
-        self.assertTrue(parser.parse_selector("h1").matches(title))
-        self.assertTrue(parser.parse_selector(".principal").matches(title))
-        self.assertTrue(parser.parse_selector("#titulo").matches(title))
-        self.assertEqual(parser.parse_selector("h1").specificity(), TAG_SPECIFICITY)
-        self.assertEqual(parser.parse_selector(".principal").specificity(), CLASS_SPECIFICITY)
-        self.assertEqual(parser.parse_selector("#titulo").specificity(), ID_SPECIFICITY)
-        self.assertIsNone(parser.parse_selector("div p"))
-        self.assertIsNone(parser.parse_selector("h1.principal"))
-
-
-class StyleAndRenderTreeTests(unittest.TestCase):
-    def test_title_is_blue_and_keeps_font_size_from_tag_rule(self):
-        document, title, *_ = case_document()
-        styles = StyleResolver().resolve(document, CSSParser().parse(CASE_CSS))
-        self.assertEqual(styles[title]["color"], "blue")
-        self.assertEqual(styles[title]["font-size"], "32px")
-
-    def test_later_equal_specificity_wins(self):
+    def test_painter_has_no_tag_specific_visual_decisions(self):
+        source = Path("painter.py").read_text(encoding="utf-8")
+        self.assertNotIn("tag ==", source)
         document = Document()
-        paragraph = add(document, "p", {"class": "descripcion"})
-        sheet = CSSParser().parse(".descripcion { color: red; } .descripcion { color: blue; }")
-        self.assertEqual(StyleResolver().resolve(document, sheet)[paragraph]["color"], "blue")
-
-    def test_hidden_node_stays_in_dom_but_not_render_tree(self):
-        document, _, _, hidden, _ = case_document()
-        styles = StyleResolver().resolve(document, CSSParser().parse(CASE_CSS))
-        tree = RenderTreeBuilder().build(document, styles)
-        self.assertIsNotNone(hidden.parent)
-        visual_nodes = []
-        def collect(node):
-            visual_nodes.append(node.dom_node)
-            for child in node.children:
-                collect(child)
-        collect(tree)
-        self.assertNotIn(hidden, visual_nodes)
+        tree = RenderTreeBuilder().build(document, StyleResolver().resolve(document, CSSParser().parse("")))
+        Painter(FakeCanvas()).paint(tree)
 
 
-class LayoutAndPainterTests(unittest.TestCase):
-    def _tree(self):
-        document, *_ = case_document()
-        styles = StyleResolver().resolve(document, CSSParser().parse(CASE_CSS))
-        return RenderTreeBuilder().build(document, styles)
+@unittest.skipUnless(quickjs_available(), "QuickJS no esta instalado")
+class QuickJSIntegrationTests(unittest.TestCase):
+    def test_adapter_exposes_document_and_applies_all_three_mutations(self):
+        document = load_document(RESOURCES / "index.html")
+        pipeline = RenderPipeline(document, FakeCanvas(), RESOURCES / "index.html")
+        pipeline.render()
+        pipeline.events.clear()
+        pipeline.execute_scripts()
+        message = find_by_id(document, "mensaje")
+        self.assertEqual(message.children[0].text, "estilos cambiados")
+        self.assertEqual(pipeline.events, ["render", "repaint", "reflow"])
+        self.assertEqual(pipeline.computed_styles[message]["color"], "gray")
+        self.assertEqual(pipeline.computed_styles[message]["font-size"], "18px")
 
-    def test_layout_calculates_boxes_without_canvas_or_paint(self):
-        tree = self._tree()
-        LayoutEngine(800, 600).layout(tree)
-        body = tree.children[0].children[1]
-        title, message, button = body.children[0], body.children[1], body.children[2]
-        self.assertEqual(body.box.width, 800)
-        self.assertGreater(title.box.height, 0)
-        self.assertGreater(message.box.y, title.box.y)
-        self.assertEqual(button.box.width, 120)
-        self.assertEqual(button.box.height, 40)
+    def test_adapter_supports_attributes_and_style_proxy(self):
+        document = Document()
+        element = add(document, "p", {"id": "sample"}, "Inicial")
+        bridge = DOMBridge(document)
+        QuickJSAdapter(bridge).execute(
+            'const el = document.getElementById("sample"); el.setAttribute("title", "ok"); '
+            'el.style.color = "red"; el.innerHTML = "Final";', "adapter-test.js")
+        self.assertEqual(element.get_attribute("title"), "ok")
+        self.assertEqual(element.get_attribute("style"), "color: red")
+        self.assertEqual(element.children[0].text, "Final")
 
-    def test_painter_only_operates_when_explicitly_called(self):
-        class FakeCanvas:
-            def __init__(self): self.operations = []
-            def delete(self, *args): self.operations.append("delete")
-            def create_text(self, *args, **kwargs): self.operations.append("text")
-            def create_rectangle(self, *args, **kwargs): self.operations.append("rectangle")
-
-        tree = self._tree()
-        canvas = FakeCanvas()
-        LayoutEngine(800, 600).layout(tree)
-        self.assertEqual(canvas.operations, [])
-        Painter(canvas).paint(tree)
-        self.assertIn("delete", canvas.operations)
-        self.assertIn("text", canvas.operations)
-
-
-class BridgeTests(unittest.TestCase):
-    def test_content_visual_and_geometry_invalidations(self):
-        class FakePipeline:
-            def __init__(self): self.calls = []
-            def render(self): self.calls.append("render")
-            def refresh_visual_styles(self): self.calls.append("repaint")
-            def restyle_and_reflow(self): self.calls.append("reflow")
-
-        document, title, *_ = case_document()
-        bridge = DOMBridge(document, FakePipeline())
-        bridge.set_text(title.children[0], "Nuevo título")
-        bridge.set_inline_style(title, "color", "red")
-        bridge.set_inline_style(title, "fontSize", "80px")
-        self.assertEqual(bridge.pipeline.calls, ["render", "repaint", "reflow"])
+    def test_canvas_click_dispatches_onclick_to_quickjs(self):
+        document = load_document(RESOURCES / "index.html")
+        pipeline = RenderPipeline(document, FakeCanvas(), RESOURCES / "index.html")
+        pipeline.render()
+        pipeline.execute_scripts()
+        pipeline.events.clear()
+        button = find_by_id(document, "boton")
+        box = render_node_for(pipeline.render_tree, button).box
+        self.assertTrue(pipeline.dispatch_click(box.x + 1, box.y + 1))
+        message = find_by_id(document, "mensaje")
+        self.assertEqual(message.children[0].text, "¡Botón ejecutado!")
+        self.assertEqual(pipeline.events, ["render", "repaint", "reflow"])
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(verbosity=2)

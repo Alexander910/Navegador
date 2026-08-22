@@ -2,9 +2,12 @@
 
 from css_loader import CSSLoader
 from cssom import CSSParser, CSSStyleSheet
+from dom_bridge import DOMBridge, QuickJSAdapter, quickjs_available
+from javascript_loader import JavaScriptLoader
 from layout import LayoutEngine
 from painter import Painter
 from render_tree import RenderTreeBuilder
+from script_discovery import ScriptDiscovery
 from style_discovery import StyleDiscovery
 from style_resolver import StyleResolver
 
@@ -19,56 +22,97 @@ class RenderPipeline:
         self.render_tree_builder = RenderTreeBuilder()
         self.layout_engine = LayoutEngine(viewport_width, viewport_height)
         self.painter = Painter(canvas)
-        self.css_paths = []
-        self.css_sources = []
-        self.cssom = CSSStyleSheet()
-        self.computed_styles = {}
-        self.render_tree = None
+        self.script_discovery = ScriptDiscovery()
+        self.javascript_loader = JavaScriptLoader(document_path=document_path)
+        self.dom_bridge = DOMBridge(document, self)
+        self.css_paths, self.css_sources = [], []
+        self.cssom, self.computed_styles, self.render_tree = CSSStyleSheet(), {}, None
+        self.script_paths, self.script_sources = [], []
+        self.script_adapter, self.javascript_context = None, None
+        self.phase_log, self.events = [], []
 
     def render(self):
-        # 1. Style Discovery -> rutas declaradas con <link rel="stylesheet">.
+        """Ejecuta las siete fases; es la ruta para contenido o estructura."""
+        self.events.append("render")
+        self.phase_log.extend(("style-discovery", "css-loader", "css-parser", "style-resolver",
+                               "render-tree", "layout", "paint"))
         self.css_paths = self.style_discovery.discover(self.document)
-        # 2. CSS Loader -> CSSSource; archivos faltantes producen fuente vacia.
         self.css_sources = self.css_loader.load_all(self.css_paths)
-        # 3. CSS Parser -> CSSOM.
         self.cssom = self.css_parser.parse(self.css_sources)
-        # 4. Style Resolver -> estilos computados.
         self.computed_styles = self.style_resolver.resolve(self.document, self.cssom)
-        # 5. Render Tree Builder -> contenido visual independiente del DOM.
         self.render_tree = self.render_tree_builder.build(self.document, self.computed_styles)
-        # 6. Layout Engine -> solo cajas geometricas del Render Tree.
         self.layout_engine.layout(self.render_tree)
-        # 7. Painter -> solo Render Tree con layout.
         self.painter.paint(self.render_tree)
         return self.render_tree
 
     def reflow(self):
-        """Reutiliza el Render Tree y recalcula solamente layout + paint."""
         if self.render_tree is None:
             return self.render()
+        self.events.append("reflow")
+        self.phase_log.extend(("layout", "paint"))
         self.layout_engine.layout(self.render_tree)
         self.painter.paint(self.render_tree)
         return self.render_tree
 
     def repaint(self):
-        """Reutiliza estilos y geometria existentes; ejecuta solo Paint."""
+        if self.render_tree is None:
+            return self.render()
+        self.events.append("repaint")
+        self.phase_log.append("paint")
         self.painter.paint(self.render_tree)
 
     def refresh_visual_styles(self):
-        """Para color/fondo: recalcula estilos y pinta sin ejecutar Layout."""
         if self.render_tree is None:
             return self.render()
+        self.phase_log.append("style-resolver")
         self.computed_styles = self.style_resolver.resolve(self.document, self.cssom)
         self._replace_styles(self.render_tree)
         self.repaint()
 
     def restyle_and_reflow(self):
-        """Para font-size y otras propiedades geometricas: estilo + layout + paint."""
         if self.render_tree is None:
             return self.render()
+        self.phase_log.append("style-resolver")
         self.computed_styles = self.style_resolver.resolve(self.document, self.cssom)
         self._replace_styles(self.render_tree)
-        self.reflow()
+        return self.reflow()
+
+    def execute_scripts(self):
+        """Descubre, carga y ejecuta scripts externos cuando QuickJS esta instalado."""
+        self.script_paths = self.script_discovery.discover(self.document)
+        if not self.script_paths:
+            return []
+        self.script_sources = self.javascript_loader.load_all(self.script_paths)
+        if not quickjs_available():
+            print("QuickJS no esta instalado; se omite JavaScript (python -m pip install quickjs).")
+            return []
+        adapter = QuickJSAdapter(self.dom_bridge)
+        context = adapter.create_context()
+        for source in self.script_sources:
+            adapter.execute(source.source, source.filename, context)
+        self.script_adapter, self.javascript_context = adapter, context
+        return self.script_sources
+
+    def dispatch_click(self, x, y):
+        """Encuentra el elemento visual clicado y despacha ``click`` a QuickJS."""
+        if self.render_tree is None or self.javascript_context is None:
+            return False
+        target = self._hit_test(self.render_tree, float(x), float(y))
+        identifier = target.dom_node.get_attribute("id") if target else None
+        if not identifier:
+            return False
+        return self.script_adapter.dispatch_event(self.javascript_context, identifier, "click")
+
+    def _hit_test(self, node, x, y):
+        box = node.box
+        contains = box.x <= x <= box.x + box.width and box.y <= y <= box.y + box.height
+        if not contains:
+            return None
+        for child in reversed(node.children):
+            hit = self._hit_test(child, x, y)
+            if hit is not None:
+                return hit
+        return node if node.node_type == "element" else None
 
     def _replace_styles(self, visual_node):
         visual_node.styles = self.computed_styles[visual_node.dom_node]

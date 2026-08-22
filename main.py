@@ -20,8 +20,10 @@ def load_document(html_path=RESOURCES / "index.html"):
 
 
 def main():
+    html_path = RESOURCES / "index.html"
+    document = load_document(html_path)
     browser = Browser()
-    browser.display(load_document(), RESOURCES / "index.html")
+    browser.display(document, html_path)
 
 
 if __name__ == "__main__":

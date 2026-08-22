@@ -1,40 +1,7 @@
-body {
-    background-color: #fff4e6;
-    color: #5c2c06;
-    font-family: Georgia;
-    font-size: 16px;
-    letter-spacing: 0.4px;
-}
-
-h1 {
-    color: #e85d04;
-    font-family: Georgia;
-    font-size: 36px;
-}
-
-.principal {
-    color: #f48c06;
-}
-
-#titulo {
-    color: #d94801;
-    font-family: Georgia;
-    font-size: 38px;
-}
-
-.descripcion {
-    color: #b45309;
-    font-family: Verdana;
-    font-size: 18px;
-}
-
-#oculto {
-    display: none;
-}
-
-button {
-    color: white;
-    background-color: #f97316;
-    font-family: "Trebuchet MS";
-    font-size: 17px;
-}
+body { background-color: white; }
+h1 { color: red; font-size: 32px; }
+.principal { color: green; }
+#titulo { color: blue; }
+.descripcion { color: gray; font-size: 18px; }
+#oculto { display: none; }
+button { color: white; background-color: blue; font-size: 16px; }

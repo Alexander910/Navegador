@@ -10,6 +10,10 @@ class CSSSource:
     source: str
 
 
+class CSSLoadError(OSError):
+    """Error de una hoja declarada por el documento."""
+
+
 class CSSLoader:
     def __init__(self, document_path=None, resources_path=None):
         self.document_path = Path(document_path).resolve() if document_path else None
@@ -19,8 +23,10 @@ class CSSLoader:
         path = self._resolve(filename)
         try:
             source = path.read_text(encoding="utf-8")
-        except (FileNotFoundError, OSError):
-            source = ""
+        except FileNotFoundError as error:
+            raise CSSLoadError(f"No se encontro la hoja CSS '{filename}' ({path})") from error
+        except OSError as error:
+            raise CSSLoadError(f"No se pudo leer la hoja CSS '{filename}' ({path}): {error}") from error
         return CSSSource(filename=str(filename), source=source)
 
     def load_all(self, filenames):

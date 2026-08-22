@@ -4,6 +4,7 @@
 class CSSOMInspector:
     def inspect(self, stylesheet):
         return [
-            {"selector": rule.selector.text, "declarations": dict(rule.declarations)}
+            {"selector": rule.selector.text,
+             "declarations": {item.property: item.value for item in rule.declarations}}
             for rule in stylesheet.rules
         ]

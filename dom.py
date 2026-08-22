@@ -9,11 +9,28 @@ class Node:
         self.children = []
 
     def append_child(self, child):
+        if not isinstance(child, Node):
+            raise TypeError("append_child espera un Node")
+        if child is self:
+            raise ValueError("Un nodo no puede ser hijo de si mismo")
+        ancestor = self
+        while ancestor is not None:
+            if ancestor is child:
+                raise ValueError("append_child no puede crear ciclos en el DOM")
+            ancestor = ancestor.parent
+        if child.parent is self:
+            if child not in self.children:
+                self.children.append(child)
+            return child
+        if child.parent is not None:
+            child.parent.remove_child(child)
         child.parent = self
         self.children.append(child)
         return child
 
     def remove_child(self, child):
+        if child not in self.children:
+            raise ValueError("El nodo no es hijo de este padre")
         self.children.remove(child)
         child.parent = None
 
