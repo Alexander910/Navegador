@@ -1,11 +1,11 @@
 import tkinter as tk
 
-from renderer import Renderer
+from pipeline import RenderPipeline
 
 
 class Browser:
 
-    def _init_(self):
+    def __init__(self):
 
         self.window = tk.Tk()
 
@@ -25,10 +25,10 @@ class Browser:
 
         self.canvas.pack(fill="both", expand=True)
 
-    def display(self, dom):
+    def display(self, dom, document_path=None):
 
-        renderer = Renderer(self.canvas)
+        self.pipeline = RenderPipeline(dom, self.canvas, document_path, 800, 600)
 
-        renderer.render(dom)
+        self.pipeline.render()
 
         self.window.mainloop()
