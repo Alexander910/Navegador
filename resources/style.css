@@ -1,7 +1,7 @@
-body { background-color: white; }
-h1 { color: red; font-size: 32px; }
-.principal { color: green; }
-#titulo { color: blue; }
-.descripcion { color: gray; font-size: 18px; }
+body { background-color: #fff7ed; color: #431407; font-family: Segoe UI; font-size: 16px; padding: 24px; }
+h1 { color: #f97316; font-size: 32px; font-weight: bold; margin: 0 0 12px 0; }
+.principal { color: #ea580c; }
+#titulo { color: #c2410c; }
+.descripcion { color: #9a3412; font-size: 18px; margin: 0 0 20px 0; }
 #oculto { display: none; }
-button { color: white; background-color: blue; font-size: 16px; }
+button { color: white; background-color: #f97316; font-size: 16px; font-weight: bold; border-width: 1px; border-color: #c2410c; }

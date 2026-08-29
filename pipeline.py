@@ -5,6 +5,7 @@ from cssom import CSSParser, CSSStyleSheet
 from dom_bridge import DOMBridge, QuickJSAdapter, quickjs_available
 from javascript_loader import JavaScriptLoader
 from layout import LayoutEngine
+from network_loader import NetworkLoader
 from painter import Painter
 from render_tree import RenderTreeBuilder
 from script_discovery import ScriptDiscovery
@@ -13,18 +14,40 @@ from style_resolver import StyleResolver
 
 
 class RenderPipeline:
-    def __init__(self, document, canvas=None, document_path=None, viewport_width=800, viewport_height=600):
+    def __init__(
+        self,
+        document,
+        canvas=None,
+        document_path=None,
+        document_url=None,
+        network_loader=None,
+        viewport_width=800,
+        viewport_height=600,
+    ):
         self.document = document
+        self.document_path = document_path
+        self.document_url = document_url
+        self.network_loader = network_loader or NetworkLoader()
+
         self.style_discovery = StyleDiscovery()
-        self.css_loader = CSSLoader(document_path=document_path)
+        self.css_loader = CSSLoader(
+            document_path=document_path,
+            document_url=document_url,
+            network_loader=self.network_loader,
+        )
         self.css_parser = CSSParser()
         self.style_resolver = StyleResolver()
         self.render_tree_builder = RenderTreeBuilder()
         self.layout_engine = LayoutEngine(viewport_width, viewport_height)
         self.painter = Painter(canvas)
         self.script_discovery = ScriptDiscovery()
-        self.javascript_loader = JavaScriptLoader(document_path=document_path)
+        self.javascript_loader = JavaScriptLoader(
+            document_path=document_path,
+            document_url=document_url,
+            network_loader=self.network_loader,
+        )
         self.dom_bridge = DOMBridge(document, self)
+
         self.css_paths, self.css_sources = [], []
         self.cssom, self.computed_styles, self.render_tree = CSSStyleSheet(), {}, None
         self.script_paths, self.script_sources = [], []
@@ -34,8 +57,10 @@ class RenderPipeline:
     def render(self):
         """Ejecuta las siete fases; es la ruta para contenido o estructura."""
         self.events.append("render")
-        self.phase_log.extend(("style-discovery", "css-loader", "css-parser", "style-resolver",
-                               "render-tree", "layout", "paint"))
+        self.phase_log.extend((
+            "style-discovery", "css-loader", "css-parser", "style-resolver",
+            "render-tree", "layout", "paint"
+        ))
         self.css_paths = self.style_discovery.discover(self.document)
         self.css_sources = self.css_loader.load_all(self.css_paths)
         self.cssom = self.css_parser.parse(self.css_sources)
@@ -84,12 +109,18 @@ class RenderPipeline:
             return []
         self.script_sources = self.javascript_loader.load_all(self.script_paths)
         if not quickjs_available():
-            print("QuickJS no esta instalado; se omite JavaScript (python -m pip install quickjs).")
+            print("QuickJS no esta instalado; se omite JavaScript.")
             return []
         adapter = QuickJSAdapter(self.dom_bridge)
         context = adapter.create_context()
         for source in self.script_sources:
-            adapter.execute(source.source, source.filename, context)
+            try:
+                adapter.execute(source.source, source.filename, context)
+            except RuntimeError as error:
+                print(
+                    f"[JavaScript] No se pudo ejecutar "
+                    f"'{source.filename}': {error}"
+                )
         self.script_adapter, self.javascript_context = adapter, context
         return self.script_sources
 

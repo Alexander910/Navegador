@@ -89,12 +89,12 @@ class ResourceAndPipelineTests(unittest.TestCase):
         description = find_by_id(self.document, "mensaje")
         hidden = find_by_id(self.document, "oculto")
         button = find_by_id(self.document, "boton")
-        self.assertEqual(pipeline.computed_styles[title]["color"], "blue")
+        self.assertEqual(pipeline.computed_styles[title]["color"], "#c2410c")
         self.assertEqual(pipeline.computed_styles[title]["font-size"], "32px")
-        self.assertEqual(pipeline.computed_styles[description]["color"], "gray")
+        self.assertEqual(pipeline.computed_styles[description]["color"], "#9a3412")
         self.assertEqual(pipeline.computed_styles[description]["font-size"], "18px")
         self.assertEqual(pipeline.computed_styles[button]["color"], "white")
-        self.assertEqual(pipeline.computed_styles[button]["background-color"], "blue")
+        self.assertEqual(pipeline.computed_styles[button]["background-color"], "#f97316")
         self.assertEqual((pipeline.computed_styles[button]["width"], pipeline.computed_styles[button]["height"]),
                          ("120px", "40px"))
         self.assertIsNotNone(hidden.parent)
@@ -113,12 +113,12 @@ class ResourceAndPipelineTests(unittest.TestCase):
         canvas = FakeCanvas()
         RenderPipeline(self.document, canvas, self.html_path).render()
         texts = [operation[2] for operation in canvas.operations if operation[0] == "text"]
-        title = next(item for item in texts if item["text"] == "Quickjs Funionando")
+        title = next(item for item in texts if item["text"] == "Quickjs Funcionando")
         description = next(item for item in texts if item["text"] == "estilos cambiados")
-        self.assertEqual((title["fill"], title["font"][1]), ("blue", 32))
-        self.assertEqual((description["fill"], description["font"][1]), ("gray", 18))
+        self.assertEqual((title["fill"], title["font"][1]), ("#c2410c", 32))
+        self.assertEqual((description["fill"], description["font"][1]), ("#9a3412", 18))
         self.assertNotIn("No deberías verme", [item["text"] for item in texts])
-        self.assertTrue(any(op[0] == "rectangle" and op[2]["fill"] == "blue"
+        self.assertTrue(any(op[0] == "rectangle" and op[2]["fill"] == "#f97316"
                             for op in canvas.operations))
 
     def test_display_block_none_block_rebuilds_render_tree(self):
@@ -225,7 +225,7 @@ class QuickJSIntegrationTests(unittest.TestCase):
         message = find_by_id(document, "mensaje")
         self.assertEqual(message.children[0].text, "estilos cambiados")
         self.assertEqual(pipeline.events, ["render", "repaint", "reflow"])
-        self.assertEqual(pipeline.computed_styles[message]["color"], "gray")
+        self.assertEqual(pipeline.computed_styles[message]["color"], "#9a3412")
         self.assertEqual(pipeline.computed_styles[message]["font-size"], "18px")
 
     def test_adapter_supports_attributes_and_style_proxy(self):

@@ -26,9 +26,16 @@ class Browser:
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Button-1>", self._on_click)
 
-    def display(self, dom, document_path=None):
+    def display(self, dom, document_path=None, document_url=None):
 
-        self.pipeline = RenderPipeline(dom, self.canvas, document_path, 800, 600)
+        self.pipeline = RenderPipeline(
+            dom,
+            self.canvas,
+            document_path=document_path,
+            document_url=document_url,
+            viewport_width=800,
+            viewport_height=600,
+        )
 
         self.pipeline.render()
         self.pipeline.execute_scripts()
